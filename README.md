@@ -1,0 +1,2 @@
+# NUR-Farm-POS
+KIRO001-PNUR-FARM OS project
