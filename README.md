@@ -1,2 +1,3 @@
 # NUR-Farm-POS
 KIRO001-PNUR-FARM OS project
+KIRO Version 0.6.29
