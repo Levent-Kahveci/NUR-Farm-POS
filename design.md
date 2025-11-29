@@ -4,7 +4,7 @@
 
 The Farm POS System is a web-based point of sale application that enables direct-to-consumer sales of farm products. The system consists of two primary user interfaces: a customer-facing storefront for browsing products, placing orders, and managing deliveries, and an administrative interface for managing products, inventory, pricing, and orders.
 
-The architecture follows a modern web application pattern with a React-based frontend, Node.js/Express backend API, PostgreSQL database for persistent storage, and integration with Square's payment processing API. The system implements geographic validation to ensure customers are within the 50-mile delivery radius and provides real-time inventory management to prevent overselling.
+The architecture follows a modern web application pattern with a React-based frontend, Node.js/Express backend API, PostgreSQL database for persistent storage, and integration with Square's payment processing API. The system implements JWT-based authentication to secure customer accounts and protect sensitive operations. Customers must register and log in to place orders, view order status, and access payment information. The system implements geographic validation to ensure customers are within the 50-mile delivery radius and provides real-time inventory management to prevent overselling. Customers can access their complete order history for up to 5 years, with the ability to filter by year.
 
 ## Architecture
 
@@ -73,6 +73,28 @@ The architecture follows a modern web application pattern with a React-based fro
 ### Frontend Components
 
 #### Customer Interface
+
+**Registration Component**
+- User registration form with email, password, first name, last name, and phone number
+- Password strength validation
+- Email format validation
+- Duplicate email detection
+- Account creation confirmation
+
+**Login Component**
+- Email and password input fields
+- Authentication error handling
+- "Remember me" option
+- Password reset link
+- Redirect to intended page after login
+
+**OrderHistory Component**
+- Year selector dropdown (past 5 years)
+- Order list display with filtering by year
+- Order details including order number, date, items, total, delivery address, and status
+- Chronological sorting (most recent first)
+- Empty state message for years with no orders
+- Order detail view modal
 
 **ProductCatalog Component**
 - Displays grid of available products
@@ -156,6 +178,15 @@ The architecture follows a modern web application pattern with a React-based fro
 
 ### Backend API Endpoints
 
+#### Authentication Endpoints
+```
+POST   /api/auth/register         - Register new customer account
+POST   /api/auth/login            - Authenticate user and return JWT token
+POST   /api/auth/logout           - Invalidate user session
+GET    /api/auth/me               - Get current authenticated user info
+POST   /api/auth/refresh          - Refresh JWT token
+```
+
 #### Product Endpoints
 ```
 GET    /api/products              - List all active products
@@ -169,18 +200,19 @@ POST   /api/products/:id/reviews  - Submit product review
 
 #### Cart Endpoints
 ```
-GET    /api/cart                  - Get current cart
-POST   /api/cart/items            - Add item to cart
-PUT    /api/cart/items/:id        - Update cart item quantity
-DELETE /api/cart/items/:id        - Remove item from cart
-DELETE /api/cart                  - Clear cart
+GET    /api/cart                  - Get current cart (authenticated)
+POST   /api/cart/items            - Add item to cart (authenticated)
+PUT    /api/cart/items/:id        - Update cart item quantity (authenticated)
+DELETE /api/cart/items/:id        - Remove item from cart (authenticated)
+DELETE /api/cart                  - Clear cart (authenticated)
 ```
 
 #### Order Endpoints
 ```
-POST   /api/orders                - Create order
-GET    /api/orders/:id            - Get order details
-GET    /api/orders                - List orders (admin/customer)
+POST   /api/orders                - Create order (authenticated)
+GET    /api/orders/:id            - Get order details (authenticated)
+GET    /api/orders                - List orders (admin/customer, authenticated)
+GET    /api/orders/history/:year  - Get order history by year (authenticated, customer)
 PUT    /api/orders/:id/status     - Update order status (admin)
 ```
 
@@ -324,8 +356,29 @@ interface Customer {
   lastName: string;
   phone: string;
   passwordHash: string;
+  role: 'customer' | 'administrator';
   createdAt: Date;
   updatedAt: Date;
+}
+```
+
+### AuthToken
+```typescript
+interface AuthToken {
+  token: string;
+  expiresAt: Date;
+  userId: string;
+}
+
+interface LoginResponse {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+  };
 }
 ```
 
@@ -695,6 +748,50 @@ interface ButcherPayment {
 *For any* expense report with N cut orders and total expenses E, the average cost per cut order should equal E / N.
 **Validates: Requirements 16.4**
 
+### Authentication and Authorization Properties
+
+**Property 52: User registration**
+*For any* valid registration data (unique email, password, first name, last name, phone), creating an account should result in a stored customer with securely hashed password.
+**Validates: Requirements 17.1, 17.2**
+
+**Property 53: Duplicate email rejection**
+*For any* registration attempt with an email that already exists in the system, the registration should be rejected with an error message.
+**Validates: Requirements 17.3**
+
+**Property 54: Authentication success**
+*For any* registered user with valid credentials, authentication should succeed and return a valid JWT token.
+**Validates: Requirements 17.4**
+
+**Property 55: Protected resource access control**
+*For any* request to ordering, order status, or payment information endpoints without valid authentication, the system should reject the request and redirect to login.
+**Validates: Requirements 17.5, 17.6, 17.7**
+
+**Property 56: Session persistence**
+*For any* authenticated user session, the session should remain valid until explicit logout or token expiration.
+**Validates: Requirements 17.8**
+
+### Order History Properties
+
+**Property 57: Order history year filtering**
+*For any* authenticated customer and selected year, the order history should display only orders placed by that customer during the selected year.
+**Validates: Requirements 18.2, 18.7**
+
+**Property 58: Order history completeness**
+*For any* order in the history view, the displayed information should include order number, order date, items, total amount, delivery address, and order status.
+**Validates: Requirements 18.3**
+
+**Property 59: Order history time limit**
+*For any* order history request, only orders from the past 5 years from the current date should be available for display.
+**Validates: Requirements 18.4**
+
+**Property 60: Order history chronological sorting**
+*For any* order history display, orders should be sorted by date with the most recent orders appearing first.
+**Validates: Requirements 18.6**
+
+**Property 61: Order history isolation**
+*For any* authenticated customer viewing order history, only orders belonging to that customer should be displayed, never orders from other customers.
+**Validates: Requirements 18.7**
+
 ## Error Handling
 
 ### Client-Side Error Handling
@@ -754,6 +851,9 @@ Common error codes:
 - `NOT_FOUND`: Resource not found
 - `UNAUTHORIZED`: Authentication required
 - `FORBIDDEN`: Insufficient permissions
+- `INVALID_CREDENTIALS`: Login credentials are incorrect
+- `DUPLICATE_EMAIL`: Email already registered
+- `TOKEN_EXPIRED`: JWT token has expired
 - `INVENTORY_UNAVAILABLE`: Product out of stock
 - `PAYMENT_FAILED`: Payment processing error
 - `DELIVERY_OUT_OF_RANGE`: Address outside delivery zone
@@ -790,10 +890,12 @@ Property-based testing will be implemented using fast-check library for JavaScri
 **Test Generators:**
 Property tests will use custom generators for domain objects:
 - Product generator (with valid/invalid variations)
-- Order generator (with various states)
+- Order generator (with various states and dates)
 - Address generator (within and outside delivery range)
 - Review generator (with valid ratings)
 - Cart generator (with various item combinations)
+- User credentials generator (with valid/invalid emails and passwords)
+- JWT token generator (with various expiration states)
 
 **Key Property Tests:**
 - Cart total calculation across random cart modifications
@@ -802,6 +904,9 @@ Property tests will use custom generators for domain objects:
 - Price preservation across price changes and order timing
 - Review rating calculation across random review sets
 - Non-negative inventory invariant across all operations
+- Authentication token generation and validation across random user credentials
+- Order history filtering by year across random order dates
+- Protected endpoint access control across authenticated and unauthenticated requests
 
 ### Integration Testing
 
@@ -817,10 +922,13 @@ Property tests will use custom generators for domain objects:
 ### End-to-End Testing
 
 Using Playwright for browser automation:
-- Complete customer purchase flow
+- User registration and login flow
+- Complete customer purchase flow (with authentication)
+- Order history viewing and filtering by year
 - Admin product and inventory management flow
 - Review submission and display flow
-- Error scenarios (payment failures, out-of-stock, delivery range)
+- Protected route access without authentication
+- Error scenarios (payment failures, out-of-stock, delivery range, invalid credentials)
 
 ### Test Data Management
 
